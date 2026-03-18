@@ -1,0 +1,56 @@
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    environment:
+      VISION_API_PORT: 8080
+      VISION_API_BASE_URL: http://api:8080
+      VISION_AI_SERVICE_URL: http://vision-service:8001
+      VISION_ADMIN_EMAIL: admin@vision.local
+      VISION_ADMIN_PASSWORD: vision123
+      VISION_ADMIN_TOKEN: vision-demo-token
+      VISION_WORKER_TOKEN: vision-worker-secret
+      VISION_UPLOAD_ROOT: /workspace/assets/uploads
+      VISION_OUTPUT_ROOT: /workspace/assets/outputs
+      VISION_DATA_ROOT: /workspace/backend/data
+    ports:
+      - "8080:8080"
+    depends_on:
+      - redis
+      - minio
+      - vision-service
+    volumes:
+      - ../assets:/workspace/assets
+      - ../backend/data:/workspace/backend/data
+
+  vision-service:
+    build:
+      context: ..
+      dockerfile: services/vision/Dockerfile
+    environment:
+      VISION_SERVICE_PORT: 8001
+      VISION_SERVICE_FFMPEG_CMD: ffmpeg -y -i "{input}" "{output}"
+      VISION_SERVICE_REAL_ESRGAN_CMD: realesrgan-ncnn-vulkan -i "{input}" -o "{output}" -s {scale}
+      VISION_SERVICE_GFPGAN_CMD: python inference_gfpgan.py -i "{input}" -o "{output_dir}"
+      VISION_SERVICE_U2NET_CMD: rembg i "{input}" "{output}"
+      VISION_SERVICE_RIFE_CMD: python inference_video.py --video "{input}" --output "{output}"
+    ports:
+      - "8001:8001"
+    volumes:
+      - ../assets:/workspace/assets
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
