@@ -6,7 +6,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir fastapi "uvicorn[standard]" pydantic-settings httpx
+RUN pip install --no-cache-dir fastapi "uvicorn[standard]" pydantic-settings httpx rembg[cpu] pillow
 
 COPY services/vision/app /app/app
 

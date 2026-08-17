@@ -133,6 +133,26 @@ Advanced job notes:
   command-template mechanism (`deoldify_cmd`, `scunet_cmd`, `sam_cmd`).
 - Worker jobs are validated (file existence, size limit, allowed extensions) before execution
   and are cancelled after `VISION_SERVICE_JOB_TIMEOUT_SECONDS` (default 600s) if they hang.
+- If an engine's binary or interpreter isn't installed, `image_upscale`/`video_upscale` jobs
+  automatically retry with ffmpeg (all other kinds fail cleanly with a clear error message).
+
+### Which engines are real today
+
+Every pipeline is a shell command template (`VISION_SERVICE_<ENGINE>_CMD`), so wiring in a real
+engine only means installing its CLI/weights and pointing the template at it — no code changes
+needed. As shipped:
+
+- **ffmpeg** (`image_upscale`, `video_upscale`, `video_transcode`): fully wired, installed in the
+  `services/vision` Docker image, no extra setup.
+- **rembg / u2net** (`background_removal`): fully wired, installed in the Docker image
+  (`rembg[cpu]`), CPU-only, downloads a ~176 MB model on first use. No GPU required.
+- **real-esrgan, realsr, waifu2x, gfpgan, lama, insightface, rife, deoldify, scunet, sam**: the
+  command templates match each project's real CLI conventions, but the binaries/weights are
+  **not** installed in the image — they typically need a GPU and multi-GB model downloads. To
+  enable one, install it in the container (or point `VISION_SERVICE_<ENGINE>_CMD` at an existing
+  install on the host) and it will run exactly like `ffmpeg`/`rembg` do. Until then, submitting a
+  job for one of these fails with a clear "command not found" error (or falls back to ffmpeg for
+  the two upscale kinds).
 
 ## Next implementation steps
 
@@ -140,4 +160,5 @@ Advanced job notes:
 2. Replace the in-process dispatcher with Redis, NATS, or another durable queue.
 3. Add signed object storage uploads and remote asset retrieval.
 4. Replace seeded credentials with real hashed users and multi-tenant auth.
-5. Install and verify each model runtime so the command templates point to real executables.
+5. Install and verify the remaining model runtimes (GPU-dependent) so their command templates
+   point to real executables.

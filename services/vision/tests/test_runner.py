@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -6,6 +7,7 @@ from app.core.settings import Settings
 from app.schemas.contracts import WorkerDispatchRequest
 from app.services.runner import (
     build_command,
+    execute_engine,
     pipeline_for_kind,
     resolve_engine,
     should_fallback_to_ffmpeg,
@@ -113,3 +115,29 @@ def test_build_command_raises_for_unconfigured_engine(tmp_path):
     settings = Settings(deoldify_cmd="")
     with pytest.raises(RuntimeError, match="No command template configured"):
         build_command(request, settings, "deoldify", tmp_path / "output.png")
+
+
+def test_execute_engine_reports_a_missing_binary_as_runtime_error(tmp_path):
+    input_file = tmp_path / "input.png"
+    input_file.write_bytes(b"fake-image-bytes")
+    request = make_request(input_uri=str(input_file), kind="face_enhancement")
+    settings = Settings(
+        gfpgan_cmd='this-binary-does-not-exist-xyz --input "{input}" --output "{output}"'
+    )
+
+    with pytest.raises(RuntimeError, match="cannot find the file specified"):
+        asyncio.run(execute_engine(request, settings, "gfpgan", tmp_path / "output.png"))
+
+
+def test_missing_binary_error_still_triggers_ffmpeg_fallback(tmp_path):
+    input_file = tmp_path / "input.png"
+    input_file.write_bytes(b"fake-image-bytes")
+    request = make_request(input_uri=str(input_file), kind="image_upscale")
+    settings = Settings(
+        real_esrgan_cmd='this-binary-does-not-exist-xyz -i "{input}" -o "{output}"'
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        asyncio.run(execute_engine(request, settings, "real_esrgan", tmp_path / "output.png"))
+
+    assert should_fallback_to_ffmpeg(request, "real_esrgan", str(exc_info.value))

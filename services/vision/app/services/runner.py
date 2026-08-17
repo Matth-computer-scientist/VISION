@@ -241,6 +241,12 @@ async def execute_engine(
         raise RuntimeError(
             f"Engine '{engine}' timed out after {settings.job_timeout_seconds:.0f}s."
         ) from exc
+    except OSError as exc:
+        # Raised when the engine's binary/interpreter isn't installed (e.g. FileNotFoundError
+        # on Windows/Linux). Re-raised as RuntimeError with the OS message preserved so
+        # should_fallback_to_ffmpeg() can still recognize it and retry with ffmpeg.
+        logger.error("job=%s engine=%s executable not found: %s", request.job_id, engine, exc)
+        raise RuntimeError(f"cannot find the file specified: {exc}") from exc
 
     if completed.returncode != 0:
         message = completed.stderr.strip() or completed.stdout.strip() or "Worker command failed."
