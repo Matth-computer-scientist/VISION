@@ -2,8 +2,8 @@ import { type FormEvent, useEffect, useState } from "react";
 
 import {
   API_BASE_LABEL,
-  buildAssetDownloadUrl,
   createJob,
+  downloadAsset,
   fetchAssets,
   fetchCapabilities,
   fetchJobs,
@@ -495,6 +495,17 @@ function App() {
     }
   }
 
+  async function handleDownload(assetId: string) {
+    if (!token) {
+      return;
+    }
+    try {
+      await downloadAsset(assetId, token);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Download failed.");
+    }
+  }
+
   function logout() {
     setStoredToken(null);
     setToken(null);
@@ -622,14 +633,13 @@ function App() {
               </div>
 
               {latestOutput && token ? (
-                <a
-                  href={buildAssetDownloadUrl(latestOutput.asset_id, token)}
-                  target="_blank"
-                  rel="noreferrer"
+                <button
+                  type="button"
+                  onClick={() => void handleDownload(latestOutput.asset_id)}
                   className="button-secondary border-white/20 bg-white/10 text-white hover:bg-white/18"
                 >
                   Download latest render
-                </a>
+                </button>
               ) : null}
             </div>
           </aside>
@@ -1145,14 +1155,13 @@ function App() {
                   ) : null}
 
                   {selectedJob.output_asset_id && token ? (
-                    <a
-                      href={buildAssetDownloadUrl(selectedJob.output_asset_id, token)}
-                      target="_blank"
-                      rel="noreferrer"
+                    <button
+                      type="button"
+                      onClick={() => void handleDownload(selectedJob.output_asset_id!)}
                       className="button-primary w-full"
                     >
                       Download focused output
-                    </a>
+                    </button>
                   ) : null}
                 </div>
               )}

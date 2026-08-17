@@ -73,8 +73,35 @@ export function fetchAssets(token: string): Promise<AssetRecord[]> {
   return request<AssetRecord[]>("/api/v1/assets", undefined, token);
 }
 
-export function buildAssetDownloadUrl(assetId: string, token: string) {
-  return `${API_BASE_URL}/api/v1/assets/${assetId}/download?token=${encodeURIComponent(token)}`;
+function extractFileName(contentDisposition: string | null, fallback: string): string {
+  if (!contentDisposition) {
+    return fallback;
+  }
+  const match = /filename="?([^";]+)"?/i.exec(contentDisposition);
+  return match?.[1] ?? fallback;
+}
+
+export async function downloadAsset(assetId: string, token: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/assets/${assetId}/download`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(body || `Download failed with status ${response.status}`);
+  }
+
+  const blob = await response.blob();
+  const fileName = extractFileName(response.headers.get("content-disposition"), assetId);
+  const objectUrl = URL.createObjectURL(blob);
+
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(objectUrl);
 }
 
 export function fetchJobs(token: string): Promise<JobRecord[]> {

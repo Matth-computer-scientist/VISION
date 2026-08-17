@@ -20,10 +20,12 @@ app = FastAPI(
     description="AI pipeline service for image and video operations with worker callbacks.",
 )
 
+allowed_origins = [origin.strip() for origin in settings.allowed_origins.split(",") if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=allowed_origins,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -10,5 +10,10 @@ dependencies = [
   "pydantic-settings>=2.4.0"
 ]
 
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+]
+
 [tool.ruff]
 line-length = 100

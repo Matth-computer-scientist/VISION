@@ -41,6 +41,7 @@ services:
       context: ..
       dockerfile: services/vision/Dockerfile
     environment:
+      VISION_WORKER_TOKEN: vision-worker-secret
       VISION_SERVICE_PORT: 8001
       VISION_SERVICE_FFMPEG_BIN: ffmpeg
       VISION_SERVICE_FFMPEG_CMD: "\"{ffmpeg_bin}\" -y -i \"{input}\" \"{output}\""

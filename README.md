@@ -43,6 +43,14 @@ One-command smoke test for the local Rust API + FastAPI worker:
 powershell -ExecutionPolicy Bypass -File .\scripts\e2e-smoke.ps1
 ```
 
+Unit tests:
+
+```bash
+npm run test:backend
+pip install -e "services/vision[dev]"
+npm run test:vision-service
+```
+
 For the web app, Vite proxies `/api/*` to `http://127.0.0.1:8080` by default in local dev.
 Override that target with `VITE_VISION_API_PROXY_TARGET` if your Rust API runs elsewhere.
 

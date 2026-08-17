@@ -4,6 +4,11 @@ build/
 coverage/
 .vite/
 .venv/
+*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+frontend/tailwind.config.js
+frontend/tailwind.config.d.ts
 __pycache__/
 .pytest_cache/
 .ruff_cache/

@@ -1,4 +1,6 @@
-from fastapi import APIRouter, BackgroundTasks
+import hmac
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from app.core.settings import get_settings
 from app.schemas.contracts import (
@@ -91,6 +93,10 @@ async def execute_worker_job(
     background_tasks: BackgroundTasks,
 ) -> WorkerDispatchResponse:
     settings = get_settings()
+
+    if not hmac.compare_digest(payload.worker_token, settings.worker_token):
+        raise HTTPException(status_code=401, detail="Invalid worker token")
+
     engine = resolve_engine(payload)
     background_tasks.add_task(run_job, payload, settings)
     return WorkerDispatchResponse(

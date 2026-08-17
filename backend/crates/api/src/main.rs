@@ -267,7 +267,7 @@ async fn download_asset(
     Query(query): Query<EventQuery>,
     AxumPath(asset_id): AxumPath<Uuid>,
 ) -> Result<(HeaderMap, Vec<u8>), ApiError> {
-    let _user = authorize_user(&headers, query.token.as_deref(), &state).await?;
+    let user = authorize_user(&headers, query.token.as_deref(), &state).await?;
 
     let asset = {
         let store = state.store.read().await;
@@ -279,6 +279,10 @@ async fn download_asset(
             .cloned()
             .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Asset not found"))?
     };
+
+    if asset.uploaded_by != user.email && user.role != "admin" {
+        return Err(api_error(StatusCode::FORBIDDEN, "You do not own this asset"));
+    }
 
     let bytes = fs::read(&asset.local_path)
         .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
@@ -960,6 +964,50 @@ impl StoredUser {
             email: self.email.clone(),
             display_name: self.display_name.clone(),
             role: self.role.clone(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn face_swap_requires_a_source_uri() {
+        let error = validate_job_inputs(&JobKind::FaceSwap, None, None).unwrap_err();
+        assert_eq!(error.0, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn face_swap_accepts_a_source_uri() {
+        assert!(validate_job_inputs(&JobKind::FaceSwap, Some("source.png"), None).is_ok());
+    }
+
+    #[test]
+    fn inpainting_requires_a_mask_uri() {
+        let error = validate_job_inputs(&JobKind::Inpainting, None, None).unwrap_err();
+        assert_eq!(error.0, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn inpainting_accepts_a_mask_uri() {
+        assert!(validate_job_inputs(&JobKind::Inpainting, None, Some("mask.png")).is_ok());
+    }
+
+    #[test]
+    fn other_kinds_need_no_secondary_input() {
+        for kind in [
+            JobKind::ImageUpscale,
+            JobKind::FaceEnhancement,
+            JobKind::BackgroundRemoval,
+            JobKind::Colorization,
+            JobKind::Denoise,
+            JobKind::Segmentation,
+            JobKind::VideoUpscale,
+            JobKind::FrameInterpolation,
+            JobKind::VideoTranscode,
+        ] {
+            assert!(validate_job_inputs(&kind, None, None).is_ok());
         }
     }
 }

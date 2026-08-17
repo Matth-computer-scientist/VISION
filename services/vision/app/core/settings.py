@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,6 +14,11 @@ class Settings(BaseSettings):
     max_input_size_mb: float = 512.0
     allowed_image_extensions: str = "png,jpg,jpeg,webp,bmp,tiff,ppm"
     allowed_video_extensions: str = "mp4,mov,mkv,avi,webm"
+    allowed_origins: str = ""
+
+    # Shared secret with the Rust API. Not prefixed with VISION_SERVICE_ because
+    # both services read the same VISION_WORKER_TOKEN value.
+    worker_token: str = Field(default="vision-worker-secret", validation_alias="VISION_WORKER_TOKEN")
 
     ffmpeg_bin: str = "ffmpeg"
     real_esrgan_cmd: str = "realesrgan-ncnn-vulkan -i \"{input}\" -o \"{output}\" -s {scale}"

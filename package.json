@@ -11,6 +11,8 @@
     "docker:logs": "docker compose -f infrastructure/docker-compose.yml logs -f",
     "docker:smoke": "powershell -ExecutionPolicy Bypass -File .\\scripts\\e2e-docker-smoke.ps1",
     "check:backend": "cargo fmt --manifest-path backend/Cargo.toml --all -- --check",
-    "check:vision-service": "python -m compileall services/vision"
+    "check:vision-service": "python -m compileall services/vision",
+    "test:backend": "cargo test --manifest-path backend/Cargo.toml -p vision-api",
+    "test:vision-service": "python -m pytest services/vision/tests"
   }
 }

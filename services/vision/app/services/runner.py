@@ -376,18 +376,25 @@ async def run_job(request: WorkerDispatchRequest, settings: Settings) -> None:
         logger.info("job=%s completed with %s", request.job_id, completed_engine)
     except Exception as exc:
         logger.error("job=%s failed: %s", request.job_id, exc)
-        await send_callback(
-            request.callback_url,
-            request.worker_token,
-            WorkerCallbackPayload(
-                status="failed",
-                progress=100,
-                message=str(exc),
-                output_uri=(
-                    str(output_path)
-                    if output_path is not None and os.path.exists(output_path)
-                    else None
+        try:
+            await send_callback(
+                request.callback_url,
+                request.worker_token,
+                WorkerCallbackPayload(
+                    status="failed",
+                    progress=100,
+                    message=str(exc),
+                    output_uri=(
+                        str(output_path)
+                        if output_path is not None and os.path.exists(output_path)
+                        else None
+                    ),
                 ),
-            ),
-            settings,
-        )
+                settings,
+            )
+        except Exception as callback_exc:
+            logger.error(
+                "job=%s failed and the failure callback also failed: %s",
+                request.job_id,
+                callback_exc,
+            )
