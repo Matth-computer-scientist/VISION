@@ -1,10 +1,37 @@
 # Vision Suite
 
-Vision Suite is an open-source, self-hostable web product for AI-powered media processing:
+**Self-hosted, open-source AI media processing — no cloud API keys, no per-image fees.**
+
+Upload an image or video, pick a pipeline, get the result back through one clean web dashboard.
+Everything runs on your own infrastructure.
+
+- 🖼️ **Image upscaling** — Real-ESRGAN, RealSR, Waifu2x, or an FFmpeg fallback that always works
+- 🎭 **Face restoration** — GFPGAN
+- ✂️ **Background removal** — rembg/u2net (CPU-only, works out of the box)
+- 🩹 **Inpainting** — LaMa, remove objects and reconstruct missing regions with a mask
+- 🔄 **Face swap** — InsightFace, primary target + secondary source input
+- 🎨 **Colorization** — DeOldify, bring black-and-white photos to life
+- 🧹 **Denoise** — SCUNet, restore low-quality photos
+- ✅ **Segmentation** — SAM, extract object masks (reusable as inpainting input)
+- 🎞️ **Frame interpolation & transcoding** — RIFE, FFmpeg
+
+Jobs are validated, timed out, and tracked live over SSE. Every pipeline is a swappable command
+template, so you bring your own engines and models — the platform layer doesn't care which one
+you use.
+
+## Status
+
+This is an early-stage, actively evolving project. FFmpeg and background removal (rembg) are
+fully wired and work today with no extra setup. The other engines are ready-to-configure command
+templates — see [Which engines are real today](#which-engines-are-real-today) below before you
+count on them out of the box. Not yet production-hardened: see
+[Next implementation steps](#next-implementation-steps).
+
+## Architecture
 
 - Web frontend in React + Vite + Tailwind
-- Core API and orchestration layer in Rust
-- AI inference services in FastAPI
+- Core API and orchestration layer in Rust (axum)
+- AI inference service in FastAPI (Python)
 
 ## Repository layout
 
