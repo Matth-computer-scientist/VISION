@@ -4,12 +4,13 @@
   "packageManager": "pnpm@10.6.2",
   "scripts": {
     "dev:web": "pnpm --dir frontend dev",
-    "dev:desktop": "pnpm --dir desktop tauri dev",
-    "dev:mobile": "pnpm --dir mobile start",
     "dev:backend": "cargo run --manifest-path backend/Cargo.toml -p vision-api",
     "dev:vision-service": "python -m uvicorn app.main:app --reload --app-dir services/vision",
+    "docker:up": "docker compose -f infrastructure/docker-compose.yml up --build",
+    "docker:down": "docker compose -f infrastructure/docker-compose.yml down",
+    "docker:logs": "docker compose -f infrastructure/docker-compose.yml logs -f",
+    "docker:smoke": "powershell -ExecutionPolicy Bypass -File .\\scripts\\e2e-docker-smoke.ps1",
     "check:backend": "cargo fmt --manifest-path backend/Cargo.toml --all -- --check",
-    "check:desktop": "cargo fmt --manifest-path desktop/src-tauri/Cargo.toml --all -- --check",
     "check:vision-service": "python -m compileall services/vision"
   }
 }

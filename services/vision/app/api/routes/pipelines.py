@@ -2,9 +2,7 @@ from fastapi import APIRouter, BackgroundTasks
 
 from app.core.settings import get_settings
 from app.schemas.contracts import (
-    JobAcceptedResponse,
     PipelineDescriptor,
-    PipelineRequest,
     WorkerDispatchRequest,
     WorkerDispatchResponse,
 )
@@ -29,7 +27,7 @@ PIPELINES = [
         id="inpainting",
         category="image",
         engines=["lama"],
-        description="Object removal and smart region reconstruction.",
+        description="Object removal and smart region reconstruction with a secondary mask input.",
     ),
     PipelineDescriptor(
         id="background-removal",
@@ -41,7 +39,25 @@ PIPELINES = [
         id="face-swap",
         category="image",
         engines=["insightface"],
-        description="Identity transfer pipeline for controlled face swap tasks.",
+        description="Identity transfer pipeline using a primary target image plus a secondary source face input.",
+    ),
+    PipelineDescriptor(
+        id="colorization",
+        category="image",
+        engines=["deoldify"],
+        description="Automatic colorization of black-and-white photos.",
+    ),
+    PipelineDescriptor(
+        id="denoise",
+        category="image",
+        engines=["scunet"],
+        description="Noise and artifact removal for restoring low-quality photos.",
+    ),
+    PipelineDescriptor(
+        id="segmentation",
+        category="image",
+        engines=["sam"],
+        description="Foreground/object mask extraction, usable as input for inpainting.",
     ),
     PipelineDescriptor(
         id="video-upscale",
@@ -67,26 +83,6 @@ PIPELINES = [
 @router.get("/pipelines", response_model=list[PipelineDescriptor])
 async def list_pipelines() -> list[PipelineDescriptor]:
     return PIPELINES
-
-
-@router.post("/jobs/upscale-image", response_model=JobAcceptedResponse, status_code=202)
-async def upscale_image(payload: PipelineRequest) -> JobAcceptedResponse:
-    return JobAcceptedResponse(
-        status="accepted",
-        pipeline="image-upscale",
-        engine=payload.engine,
-        next_step="The worker can run FFmpeg immediately and fall back from missing AI binaries when needed.",
-    )
-
-
-@router.post("/jobs/interpolate-video", response_model=JobAcceptedResponse, status_code=202)
-async def interpolate_video(payload: PipelineRequest) -> JobAcceptedResponse:
-    return JobAcceptedResponse(
-        status="accepted",
-        pipeline="frame-interpolation",
-        engine=payload.engine,
-        next_step="The worker can run RIFE and rebuild the target video with FFmpeg.",
-    )
 
 
 @router.post("/worker/execute", response_model=WorkerDispatchResponse, status_code=202)

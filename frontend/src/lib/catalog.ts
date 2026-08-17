@@ -4,16 +4,6 @@ export const productSurfaces = [
     stack: "React + Vite + Tailwind",
     summary: "Upload media, compare versions, review failures, and manage batch jobs.",
   },
-  {
-    name: "Desktop shell",
-    stack: "Tauri + Rust",
-    summary: "Access local folders, native dialogs, drag-and-drop, and larger exports.",
-  },
-  {
-    name: "Mobile companion",
-    stack: "React Native",
-    summary: "Track progress, approve tasks, and receive push-style notifications later.",
-  },
 ];
 
 export const serviceFlow = [
@@ -38,6 +28,21 @@ export const pipelines = [
     title: "Inpainting",
     engines: "LaMa",
     output: "Object removal and missing region reconstruction",
+  },
+  {
+    title: "Colorization",
+    engines: "DeOldify",
+    output: "Automatic colorization of black-and-white photos",
+  },
+  {
+    title: "Denoise",
+    engines: "SCUNet",
+    output: "Noise and artifact removal for low-quality photos",
+  },
+  {
+    title: "Segmentation",
+    engines: "Segment Anything (SAM)",
+    output: "Foreground/object masks, reusable as inpainting input",
   },
   {
     title: "Video Smoothness",

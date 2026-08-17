@@ -9,7 +9,7 @@ use std::{
 
 use axum::{
     extract::{Multipart, Path as AxumPath, Query, State},
-    http::{header, HeaderMap, StatusCode},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
     response::sse::{Event, KeepAlive, Sse},
     routing::{get, post},
     Json, Router,
@@ -26,10 +26,10 @@ use tower_http::{
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use uuid::Uuid;
 use vision_core::{
-    AppDescriptor, AssetRecord, AuthResponse, CapabilityCatalog, CreateJobRequest,
-    CreateJobResponse, HealthResponse, JobEvent, JobKind, JobProgressUpdate, JobRecord, JobStatus,
-    LoginRequest, ServiceDescriptor, UploadResponse, UserProfile, WorkerDispatchRequest,
-    WorkerDispatchResponse,
+    AppDescriptor, AssetKind, AssetRecord, AuthResponse, CapabilityCatalog, CreateJobRequest,
+    CreateJobResponse, HealthResponse, JobEvent, JobKind, JobProgressUpdate, JobRecord,
+    JobStatus, LoginRequest, ServiceDescriptor, UploadResponse, UserProfile,
+    WorkerDispatchRequest, WorkerDispatchResponse,
 };
 
 type ApiError = (StatusCode, Json<serde_json::Value>);
@@ -144,6 +144,7 @@ async fn main() {
         .route("/api/v1/auth/login", post(login))
         .route("/api/v1/auth/me", get(me))
         .route("/api/v1/assets", get(list_assets))
+        .route("/api/v1/assets/{asset_id}/download", get(download_asset))
         .route("/api/v1/uploads", post(upload_file))
         .route("/api/v1/jobs", get(list_jobs).post(create_job))
         .route("/api/v1/jobs/events", get(job_events))
@@ -197,16 +198,6 @@ async fn capabilities() -> Json<CapabilityCatalog> {
                 stack: "React + Vite + Tailwind".into(),
                 role: "Authenticated web cockpit with uploads and live job telemetry".into(),
             },
-            AppDescriptor {
-                name: "desktop".into(),
-                stack: "Tauri + Rust".into(),
-                role: "Native shell that authenticates against the backend and lists jobs".into(),
-            },
-            AppDescriptor {
-                name: "mobile".into(),
-                stack: "React Native".into(),
-                role: "Mobile job monitoring with backend connectivity".into(),
-            },
         ],
         services: vec![
             ServiceDescriptor {
@@ -229,6 +220,9 @@ async fn capabilities() -> Json<CapabilityCatalog> {
             JobKind::BackgroundRemoval,
             JobKind::Inpainting,
             JobKind::FaceSwap,
+            JobKind::Colorization,
+            JobKind::Denoise,
+            JobKind::Segmentation,
             JobKind::VideoUpscale,
             JobKind::FrameInterpolation,
             JobKind::VideoTranscode,
@@ -262,7 +256,53 @@ async fn me(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<User
 async fn list_assets(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Vec<AssetRecord>> {
     let _user = authorize_user(&headers, None, &state).await?;
     let store = state.store.read().await;
-    Ok(Json(store.snapshot.assets.clone()))
+    let mut assets = store.snapshot.assets.clone();
+    assets.sort_by(|left, right| right.uploaded_at_epoch_ms.cmp(&left.uploaded_at_epoch_ms));
+    Ok(Json(assets))
+}
+
+async fn download_asset(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<EventQuery>,
+    AxumPath(asset_id): AxumPath<Uuid>,
+) -> Result<(HeaderMap, Vec<u8>), ApiError> {
+    let _user = authorize_user(&headers, query.token.as_deref(), &state).await?;
+
+    let asset = {
+        let store = state.store.read().await;
+        store
+            .snapshot
+            .assets
+            .iter()
+            .find(|asset| asset.asset_id == asset_id)
+            .cloned()
+            .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Asset not found"))?
+    };
+
+    let bytes = fs::read(&asset.local_path)
+        .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+
+    let mut response_headers = HeaderMap::new();
+    let content_type = asset
+        .content_type
+        .clone()
+        .unwrap_or_else(|| content_type_for_path(Path::new(&asset.local_path)).into());
+    response_headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_str(&content_type)
+            .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream")),
+    );
+
+    let file_name = sanitize_download_name(&asset.original_name);
+    let content_disposition = format!("attachment; filename=\"{}\"", file_name);
+    response_headers.insert(
+        header::CONTENT_DISPOSITION,
+        HeaderValue::from_str(&content_disposition)
+            .unwrap_or_else(|_| HeaderValue::from_static("attachment")),
+    );
+
+    Ok((response_headers, bytes))
 }
 
 async fn upload_file(
@@ -293,14 +333,15 @@ async fn upload_file(
         fs::write(&path, &bytes)
             .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
 
-        let asset = AssetRecord {
-            asset_id: Uuid::new_v4(),
-            original_name: file_name,
+        let asset = build_asset_record(
+            &path,
+            file_name,
             stored_name,
-            local_path: path.to_string_lossy().to_string(),
-            uploaded_at_epoch_ms: now_epoch_ms(),
-            uploaded_by: user.email.clone(),
-        };
+            user.email.clone(),
+            AssetKind::Input,
+            None,
+        )
+        .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error))?;
 
         {
             let mut store = state.store.write().await;
@@ -327,6 +368,15 @@ async fn create_job(
     let user = authorize_user(&headers, None, &state).await?;
 
     let input_uri = resolve_job_input(&state, payload.asset_id, payload.input_uri.clone()).await?;
+    let source_uri = resolve_optional_job_input(
+        &state,
+        payload.source_asset_id,
+        payload.source_input_uri.clone(),
+    )
+    .await?;
+    let mask_uri =
+        resolve_optional_job_input(&state, payload.mask_asset_id, payload.mask_uri.clone()).await?;
+    validate_job_inputs(&payload.kind, source_uri.as_deref(), mask_uri.as_deref())?;
     let job_id = Uuid::new_v4();
     let output_dir = state.output_root.join(job_id.to_string());
     ensure_directory(&output_dir)
@@ -339,11 +389,16 @@ async fn create_job(
         status: JobStatus::Queued,
         progress: 0,
         asset_id: payload.asset_id,
+        source_asset_id: payload.source_asset_id,
+        mask_asset_id: payload.mask_asset_id,
         input_uri,
+        source_uri,
+        mask_uri,
         output_format: payload.output_format,
         options: payload.options,
         dispatched_to: state.ai_service_url.clone(),
         output_uri: None,
+        output_asset_id: None,
         message: Some("Queued for worker dispatch".into()),
         submitted_at_epoch_ms: now,
         updated_at_epoch_ms: now,
@@ -431,7 +486,7 @@ async fn update_job_progress(
             .position(|job| job.job_id == job_id)
             .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Job not found"))?;
 
-        let cloned = {
+        let output_registration = {
             let job = &mut store.snapshot.jobs[position];
             if let Some(status) = update.status {
                 job.status = status;
@@ -445,6 +500,28 @@ async fn update_job_progress(
             if let Some(output_uri) = update.output_uri {
                 job.output_uri = Some(output_uri);
             }
+            if matches!(job.status, JobStatus::Succeeded) {
+                job.output_uri
+                    .clone()
+                    .map(|output_uri| (job.job_id, output_uri, job.created_by.clone()))
+            } else {
+                None
+            }
+        };
+
+        if let Some((tracked_job_id, output_uri, created_by)) = output_registration {
+            let output_asset_id = ensure_output_asset(
+                &mut store.snapshot,
+                tracked_job_id,
+                &output_uri,
+                &created_by,
+            )
+            .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error))?;
+            store.snapshot.jobs[position].output_asset_id = output_asset_id;
+        }
+
+        let cloned = {
+            let job = &mut store.snapshot.jobs[position];
             job.updated_at_epoch_ms = now_epoch_ms();
             job.clone()
         };
@@ -480,6 +557,36 @@ async fn resolve_job_input(
         .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "Provide asset_id or input_uri"))?;
 
     Ok(input_uri)
+}
+
+async fn resolve_optional_job_input(
+    state: &AppState,
+    asset_id: Option<Uuid>,
+    input_uri: Option<String>,
+) -> Result<Option<String>, ApiError> {
+    if asset_id.is_none() && input_uri.as_deref().unwrap_or_default().trim().is_empty() {
+        return Ok(None);
+    }
+
+    resolve_job_input(state, asset_id, input_uri).await.map(Some)
+}
+
+fn validate_job_inputs(
+    kind: &JobKind,
+    source_uri: Option<&str>,
+    mask_uri: Option<&str>,
+) -> Result<(), ApiError> {
+    match kind {
+        JobKind::FaceSwap if source_uri.is_none() => Err(api_error(
+            StatusCode::BAD_REQUEST,
+            "Face swap requires source_asset_id or source_input_uri",
+        )),
+        JobKind::Inpainting if mask_uri.is_none() => Err(api_error(
+            StatusCode::BAD_REQUEST,
+            "Inpainting requires mask_asset_id or mask_uri",
+        )),
+        _ => Ok(()),
+    }
 }
 
 fn emit_job_event(state: &AppState, event: &str, job: JobRecord) {
@@ -527,6 +634,8 @@ async fn dispatch_job(state: &AppState, job_id: Uuid) -> Result<(), String> {
         job_id,
         kind: job.kind.clone(),
         input_uri: job.input_uri.clone(),
+        source_uri: job.source_uri.clone(),
+        mask_uri: job.mask_uri.clone(),
         output_dir: output_dir.to_string_lossy().to_string(),
         output_format: job.output_format.clone(),
         options: job.options.clone(),
@@ -689,12 +798,100 @@ fn ensure_directory(path: &Path) -> std::io::Result<()> {
     fs::create_dir_all(path)
 }
 
+fn build_asset_record(
+    path: &Path,
+    original_name: String,
+    stored_name: String,
+    uploaded_by: String,
+    kind: AssetKind,
+    job_id: Option<Uuid>,
+) -> Result<AssetRecord, String> {
+    let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
+
+    Ok(AssetRecord {
+        asset_id: Uuid::new_v4(),
+        kind,
+        job_id,
+        original_name,
+        stored_name,
+        local_path: path.to_string_lossy().to_string(),
+        content_type: Some(content_type_for_path(path).into()),
+        size_bytes: metadata.len(),
+        uploaded_at_epoch_ms: now_epoch_ms(),
+        uploaded_by,
+    })
+}
+
+fn ensure_output_asset(
+    snapshot: &mut DatabaseSnapshot,
+    job_id: Uuid,
+    output_uri: &str,
+    uploaded_by: &str,
+) -> Result<Option<Uuid>, String> {
+    if let Some(existing) = snapshot.assets.iter().find(|asset| {
+        matches!(asset.kind, AssetKind::Output)
+            && asset.job_id == Some(job_id)
+            && asset.local_path == output_uri
+    }) {
+        return Ok(Some(existing.asset_id));
+    }
+
+    let path = PathBuf::from(output_uri);
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| format!("Invalid output path: {output_uri}"))?
+        .to_string();
+
+    let asset = build_asset_record(
+        &path,
+        file_name.clone(),
+        file_name,
+        uploaded_by.into(),
+        AssetKind::Output,
+        Some(job_id),
+    )?;
+    let asset_id = asset.asset_id;
+    snapshot.assets.push(asset);
+    Ok(Some(asset_id))
+}
+
+fn content_type_for_path(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("webp") => "image/webp",
+        Some("ppm") => "image/x-portable-pixmap",
+        Some("bmp") => "image/bmp",
+        Some("gif") => "image/gif",
+        Some("mp4") => "video/mp4",
+        Some("mov") => "video/quicktime",
+        Some("mkv") => "video/x-matroska",
+        Some("webm") => "video/webm",
+        Some("avi") => "video/x-msvideo",
+        _ => "application/octet-stream",
+    }
+}
+
 fn sanitize_file_name(file_name: &str) -> String {
     Path::new(file_name)
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("upload.bin")
         .replace(' ', "-")
+}
+
+fn sanitize_download_name(file_name: &str) -> String {
+    sanitize_file_name(file_name).replace('"', "")
 }
 
 fn now_epoch_ms() -> u64 {

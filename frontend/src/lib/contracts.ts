@@ -9,6 +9,7 @@ export type JobKind =
   | "video_transcode";
 
 export type JobStatus = "queued" | "running" | "succeeded" | "failed";
+export type AssetKind = "input" | "output";
 
 export type AppDescriptor = {
   name: string;
@@ -47,9 +48,13 @@ export type LoginRequest = {
 
 export type AssetRecord = {
   asset_id: string;
+  kind: AssetKind;
+  job_id?: string | null;
   original_name: string;
   stored_name: string;
   local_path: string;
+  content_type?: string | null;
+  size_bytes: number;
   uploaded_at_epoch_ms: number;
   uploaded_by: string;
 };
@@ -61,7 +66,11 @@ export type UploadResponse = {
 export type CreateJobRequest = {
   kind: JobKind;
   asset_id?: string | null;
+  source_asset_id?: string | null;
+  mask_asset_id?: string | null;
   input_uri?: string | null;
+  source_input_uri?: string | null;
+  mask_uri?: string | null;
   output_format?: string | null;
   options: Record<string, string>;
 };
@@ -72,11 +81,16 @@ export type JobRecord = {
   status: JobStatus;
   progress: number;
   asset_id?: string | null;
+  source_asset_id?: string | null;
+  mask_asset_id?: string | null;
   input_uri: string;
+  source_uri?: string | null;
+  mask_uri?: string | null;
   output_format?: string | null;
   options: Record<string, string>;
   dispatched_to: string;
   output_uri?: string | null;
+  output_asset_id?: string | null;
   message?: string | null;
   submitted_at_epoch_ms: number;
   updated_at_epoch_ms: number;

@@ -18,6 +18,9 @@ pub enum JobKind {
     BackgroundRemoval,
     Inpainting,
     FaceSwap,
+    Colorization,
+    Denoise,
+    Segmentation,
     VideoUpscale,
     FrameInterpolation,
     VideoTranscode,
@@ -30,6 +33,14 @@ pub enum JobStatus {
     Running,
     Succeeded,
     Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AssetKind {
+    #[default]
+    Input,
+    Output,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,9 +66,17 @@ pub struct AuthResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssetRecord {
     pub asset_id: Uuid,
+    #[serde(default)]
+    pub kind: AssetKind,
+    #[serde(default)]
+    pub job_id: Option<Uuid>,
     pub original_name: String,
     pub stored_name: String,
     pub local_path: String,
+    #[serde(default)]
+    pub content_type: Option<String>,
+    #[serde(default)]
+    pub size_bytes: u64,
     pub uploaded_at_epoch_ms: u64,
     pub uploaded_by: String,
 }
@@ -71,7 +90,11 @@ pub struct UploadResponse {
 pub struct CreateJobRequest {
     pub kind: JobKind,
     pub asset_id: Option<Uuid>,
+    pub source_asset_id: Option<Uuid>,
+    pub mask_asset_id: Option<Uuid>,
     pub input_uri: Option<String>,
+    pub source_input_uri: Option<String>,
+    pub mask_uri: Option<String>,
     pub output_format: Option<String>,
     #[serde(default)]
     pub options: BTreeMap<String, String>,
@@ -84,12 +107,22 @@ pub struct JobRecord {
     pub status: JobStatus,
     pub progress: u8,
     pub asset_id: Option<Uuid>,
+    #[serde(default)]
+    pub source_asset_id: Option<Uuid>,
+    #[serde(default)]
+    pub mask_asset_id: Option<Uuid>,
     pub input_uri: String,
+    #[serde(default)]
+    pub source_uri: Option<String>,
+    #[serde(default)]
+    pub mask_uri: Option<String>,
     pub output_format: Option<String>,
     #[serde(default)]
     pub options: BTreeMap<String, String>,
     pub dispatched_to: String,
     pub output_uri: Option<String>,
+    #[serde(default)]
+    pub output_asset_id: Option<Uuid>,
     pub message: Option<String>,
     pub submitted_at_epoch_ms: u64,
     pub updated_at_epoch_ms: u64,
@@ -114,6 +147,10 @@ pub struct WorkerDispatchRequest {
     pub job_id: Uuid,
     pub kind: JobKind,
     pub input_uri: String,
+    #[serde(default)]
+    pub source_uri: Option<String>,
+    #[serde(default)]
+    pub mask_uri: Option<String>,
     pub output_dir: String,
     pub output_format: Option<String>,
     #[serde(default)]

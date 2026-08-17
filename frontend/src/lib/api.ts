@@ -10,8 +10,12 @@ import type {
   UserProfile,
 } from "./contracts";
 
-export const API_BASE_URL =
-  import.meta.env.VITE_VISION_API_BASE_URL ?? "http://localhost:8080";
+const configuredApiBaseUrl = (import.meta.env.VITE_VISION_API_BASE_URL ?? "").trim();
+
+export const API_BASE_URL = configuredApiBaseUrl
+  ? configuredApiBaseUrl.replace(/\/$/, "")
+  : "";
+export const API_BASE_LABEL = API_BASE_URL || "same-origin / proxied";
 
 const TOKEN_KEY = "vision-suite-token";
 
@@ -67,6 +71,10 @@ export function fetchCapabilities(): Promise<CapabilityCatalog> {
 
 export function fetchAssets(token: string): Promise<AssetRecord[]> {
   return request<AssetRecord[]>("/api/v1/assets", undefined, token);
+}
+
+export function buildAssetDownloadUrl(assetId: string, token: string) {
+  return `${API_BASE_URL}/api/v1/assets/${assetId}/download?token=${encodeURIComponent(token)}`;
 }
 
 export function fetchJobs(token: string): Promise<JobRecord[]> {

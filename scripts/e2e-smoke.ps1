@@ -142,11 +142,27 @@ try {
         throw "Output file is missing at $($job.output_uri)"
     }
 
+    if (-not $job.output_asset_id) {
+        throw "Job succeeded but no output_asset_id was registered."
+    }
+
+    $downloadTarget = Join-Path $workspace "logs\smoke-output.png"
+    Invoke-WebRequest `
+        -Uri "$ApiBaseUrl/api/v1/assets/$($job.output_asset_id)/download" `
+        -Method Get `
+        -Headers $headers `
+        -OutFile $downloadTarget
+
+    if (-not (Test-Path $downloadTarget)) {
+        throw "The asset download endpoint did not produce a file."
+    }
+
     [pscustomobject]@{
         worker_health = $workerHealth
         api_health = $apiHealth
         asset_id = $upload.asset.asset_id
         job_id = $job.job_id
+        output_asset_id = $job.output_asset_id
         status = $job.status
         output_uri = $job.output_uri
         progress = $job.progress

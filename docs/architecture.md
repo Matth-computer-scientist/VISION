@@ -17,7 +17,7 @@ Rust owns the platform contract. FastAPI owns model execution.
 ## High-level topology
 
 ```text
-Web / Desktop / Mobile
+Web
           |
           v
      Rust API Gateway
@@ -37,7 +37,7 @@ Real-ESRGAN / GFPGAN / LaMa / RIFE / FFmpeg
 ### Rust backend
 
 - User authentication and permissions
-- Bearer token session validation for web, desktop, and mobile
+- Bearer token session validation for the web client
 - Billing, quotas, rate limits
 - Job creation and state transitions
 - Persistent uploads and file-backed metadata storage
@@ -79,24 +79,6 @@ Use the web app as the operations cockpit:
 - manage jobs
 - inspect errors
 - compare before and after results
-
-### Desktop
-
-Use Tauri where local access matters:
-
-- ingest files from local folders
-- watch directories
-- export large jobs
-- use native dialogs and local GPU helpers
-
-### Mobile
-
-Keep mobile focused:
-
-- monitor job progress
-- approve tasks
-- receive notifications
-- trigger lightweight actions
 
 ## Recommended next backend milestones
 

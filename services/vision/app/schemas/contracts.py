@@ -8,6 +8,9 @@ JobKind = Literal[
     "background_removal",
     "inpainting",
     "face_swap",
+    "colorization",
+    "denoise",
+    "segmentation",
     "video_upscale",
     "frame_interpolation",
     "video_transcode",
@@ -29,24 +32,12 @@ class PipelineDescriptor(BaseModel):
     description: str
 
 
-class PipelineRequest(BaseModel):
-    source_uri: str
-    engine: str
-    output_uri: str | None = None
-    options: dict[str, str | int | float | bool] = Field(default_factory=dict)
-
-
-class JobAcceptedResponse(BaseModel):
-    status: Literal["accepted"]
-    pipeline: str
-    engine: str
-    next_step: str
-
-
 class WorkerDispatchRequest(BaseModel):
     job_id: str
     kind: JobKind
     input_uri: str
+    source_uri: str | None = None
+    mask_uri: str | None = None
     output_dir: str
     output_format: str | None = None
     options: dict[str, str] = Field(default_factory=dict)

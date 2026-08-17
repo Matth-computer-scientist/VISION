@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import shlex
 import shutil
@@ -10,12 +11,17 @@ import httpx
 from app.core.settings import Settings
 from app.schemas.contracts import WorkerCallbackPayload, WorkerDispatchRequest
 
+logger = logging.getLogger("vision.runner")
+
 ENGINE_BY_KIND: dict[str, str] = {
     "image_upscale": "ffmpeg",
     "face_enhancement": "gfpgan",
     "background_removal": "u2net",
     "inpainting": "lama",
     "face_swap": "insightface",
+    "colorization": "deoldify",
+    "denoise": "scunet",
+    "segmentation": "sam",
     "video_upscale": "ffmpeg",
     "frame_interpolation": "rife",
     "video_transcode": "ffmpeg",
@@ -27,10 +33,25 @@ PIPELINE_BY_KIND: dict[str, str] = {
     "background_removal": "background-removal",
     "inpainting": "inpainting",
     "face_swap": "face-swap",
+    "colorization": "colorization",
+    "denoise": "denoise",
+    "segmentation": "segmentation",
     "video_upscale": "video-upscale",
     "frame_interpolation": "frame-interpolation",
     "video_transcode": "video-transcode",
 }
+
+IMAGE_KINDS = {
+    "image_upscale",
+    "face_enhancement",
+    "background_removal",
+    "inpainting",
+    "face_swap",
+    "colorization",
+    "denoise",
+    "segmentation",
+}
+VIDEO_KINDS = {"video_upscale", "frame_interpolation", "video_transcode"}
 
 
 def resolve_engine(request: WorkerDispatchRequest) -> str:
@@ -69,11 +90,14 @@ def build_command(
     format_values = {
         "input": str(input_path),
         "input_dir": str(input_path.parent),
+        "source": request.source_uri or "",
+        "source_dir": str(Path(request.source_uri).parent) if request.source_uri else "",
+        "mask": request.mask_uri or "",
+        "mask_dir": str(Path(request.mask_uri).parent) if request.mask_uri else "",
         "output": str(output_path),
         "output_dir": str(output_path.parent),
         "scale": request.options.get("scale", "4"),
         "fps": request.options.get("fps", "60"),
-        "mask": request.options.get("mask", ""),
         "ffmpeg_bin": settings.ffmpeg_bin,
     }
     return template.format(**format_values)
@@ -129,6 +153,62 @@ def ensure_ffmpeg_available(settings: Settings) -> None:
     )
 
 
+def validate_request_inputs(request: WorkerDispatchRequest, settings: Settings) -> None:
+    if request.kind == "face_swap" and not request.source_uri:
+        raise RuntimeError("Face swap requires a source input.")
+
+    if request.kind == "inpainting" and not request.mask_uri:
+        raise RuntimeError("Inpainting requires a mask input.")
+
+    allowed_extensions = (
+        _parse_extensions(settings.allowed_video_extensions)
+        if request.kind in VIDEO_KINDS
+        else _parse_extensions(settings.allowed_image_extensions)
+    )
+
+    for label, uri in (
+        ("input", request.input_uri),
+        ("source", request.source_uri),
+        ("mask", request.mask_uri),
+    ):
+        if not uri:
+            continue
+        _validate_file_input(label, uri, allowed_extensions, settings.max_input_size_mb)
+
+
+def _parse_extensions(raw: str) -> set[str]:
+    return {item.strip().lower().lstrip(".") for item in raw.split(",") if item.strip()}
+
+
+def _validate_file_input(
+    label: str,
+    uri: str,
+    allowed_extensions: set[str],
+    max_size_mb: float,
+) -> None:
+    path = Path(uri)
+
+    extension = path.suffix.lstrip(".").lower()
+    if allowed_extensions and extension not in allowed_extensions:
+        raise RuntimeError(
+            f"Unsupported {label} file extension '.{extension}'. "
+            f"Allowed: {', '.join(sorted(allowed_extensions))}."
+        )
+
+    if not path.exists():
+        raise RuntimeError(f"The {label} file was not found at {uri}.")
+
+    if not path.is_file():
+        raise RuntimeError(f"The {label} path is not a file: {uri}.")
+
+    size_mb = path.stat().st_size / (1024 * 1024)
+    if size_mb > max_size_mb:
+        raise RuntimeError(
+            f"The {label} file is {size_mb:.1f} MB, which exceeds the "
+            f"{max_size_mb:.0f} MB limit."
+        )
+
+
 async def execute_engine(
     request: WorkerDispatchRequest,
     settings: Settings,
@@ -143,24 +223,40 @@ async def execute_engine(
     if not argv:
         raise RuntimeError(f"Unable to build a command for engine '{engine}'.")
 
-    completed = await asyncio.to_thread(
-        subprocess.run,
-        argv,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    logger.info("job=%s engine=%s starting command", request.job_id, engine)
+
+    try:
+        completed = await asyncio.to_thread(
+            subprocess.run,
+            argv,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=settings.job_timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as exc:
+        logger.error(
+            "job=%s engine=%s timed out after %ss", request.job_id, engine, settings.job_timeout_seconds
+        )
+        raise RuntimeError(
+            f"Engine '{engine}' timed out after {settings.job_timeout_seconds:.0f}s."
+        ) from exc
 
     if completed.returncode != 0:
         message = completed.stderr.strip() or completed.stdout.strip() or "Worker command failed."
+        logger.error("job=%s engine=%s failed: %s", request.job_id, engine, message)
         raise RuntimeError(message)
 
     materialized_output = resolve_materialized_output(output_path)
     if materialized_output is None:
+        logger.error(
+            "job=%s engine=%s produced no output file at %s", request.job_id, engine, output_path
+        )
         raise RuntimeError(
             f"Worker finished without producing an output file at {output_path}."
         )
 
+    logger.info("job=%s engine=%s completed -> %s", request.job_id, engine, materialized_output)
     return materialized_output
 
 
@@ -200,8 +296,13 @@ async def send_callback(
 
 async def run_job(request: WorkerDispatchRequest, settings: Settings) -> None:
     requested_engine = resolve_engine(request)
+    output_path: Path | None = None
+
+    logger.info("job=%s kind=%s engine=%s accepted", request.job_id, request.kind, requested_engine)
 
     try:
+        validate_request_inputs(request, settings)
+
         await send_callback(
             request.callback_url,
             request.worker_token,
@@ -227,6 +328,13 @@ async def run_job(request: WorkerDispatchRequest, settings: Settings) -> None:
         except RuntimeError as exc:
             if not should_fallback_to_ffmpeg(request, requested_engine, str(exc)):
                 raise
+
+            logger.warning(
+                "job=%s engine=%s unavailable (%s), falling back to ffmpeg",
+                request.job_id,
+                requested_engine,
+                exc,
+            )
 
             fallback_engine = "ffmpeg"
             fallback_output_path = build_output_path(request, fallback_engine)
@@ -265,7 +373,9 @@ async def run_job(request: WorkerDispatchRequest, settings: Settings) -> None:
             ),
             settings,
         )
+        logger.info("job=%s completed with %s", request.job_id, completed_engine)
     except Exception as exc:
+        logger.error("job=%s failed: %s", request.job_id, exc)
         await send_callback(
             request.callback_url,
             request.worker_token,
@@ -273,7 +383,11 @@ async def run_job(request: WorkerDispatchRequest, settings: Settings) -> None:
                 status="failed",
                 progress=100,
                 message=str(exc),
-                output_uri=str(output_path) if os.path.exists(output_path) else None,
+                output_uri=(
+                    str(output_path)
+                    if output_path is not None and os.path.exists(output_path)
+                    else None
+                ),
             ),
             settings,
         )
